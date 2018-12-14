@@ -346,6 +346,12 @@ static counter_t dTlb_miss_cycle = 0;
 static counter_t branch_mis_cycle = 0;
 static counter_t longlat_fu_cycle = 0;
 
+/* Source of instruction flow blockage */
+static enum {iL1, iL2, iTlb} inst_missed;
+static enum {dL1, dL2, dTlb} data_missed;
+static int last_br_spec = TRUE; /* TRUE if last branch succeed, FALSE else */
+
+
 /* occupancy counters */
 static counter_t IFQ_count;		/* cumulative IFQ occupancy */
 static counter_t IFQ_fcount;		/* cumulative IFQ full count */
@@ -460,6 +466,11 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
     /* access next level of data cache hierarchy */
     lat = cache_access(cache_dl2, cmd, baddr, NULL, bsize,
         /* now */now, /* pudata */NULL, /* repl addr */NULL);
+
+    /* JWHUR find the source of data miss */
+    if (lat > cache_dl2_lat)
+      data_missed = dL2;
+
     if (cmd == Read)
       return lat;
     else
@@ -514,6 +525,11 @@ il1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
     /* access next level of inst cache hierarchy */
     lat = cache_access(cache_il2, cmd, baddr, NULL, bsize,
         /* now */now, /* pudata */NULL, /* repl addr */NULL);
+
+    /* JWHUR find the source of instruction miss */
+    if (lat > cache_il2_lat)
+      inst_missed = iL2;
+
     if (cmd == Read)
       return lat;
     else
@@ -1525,10 +1541,6 @@ struct FMT_row {
 static struct FMT_row *FMT;
 static int FMT_fetch, FMT_dispatch_head, FMT_dispatch_tail;
 static int FMT_num, FMT_size;
-
-static enum {iL1, iL2, iTlb} inst_missed;
-static enum {dL1, dL2, dTlb} data_missed;
-static int last_br_spec = TRUE; /* TRUE if last branch succeed, FALSE else */
 
   static void
 FMT_init(void)
@@ -2900,9 +2912,9 @@ ruu_issue(void)
                   events |= PEV_TLBMISS;
 
                 /* JWHUR find the source of data miss */
-                if (load_lat >= tlb_lat)
+                if (load_lat >= tlb_lat && data_missed != dL2)
                   data_missed = dL1;
-                else
+                else if (data_missed != dL2)
                   data_missed = dTlb;
 
                 /* D-cache/D-TLB accesses occur in parallel */
@@ -4414,9 +4426,9 @@ ruu_fetch(void)
           last_inst_tmissed = TRUE;
 
         /* JWHUR find the source of instruction miss */
-        if (lat >= tlb_lat)
+        if (lat >= tlb_lat && inst_missed != iL2)
           inst_missed = iL1;
-        else
+        else if (inst_missed != iL2)
           inst_missed = iTlb;
 
         /* I-cache/I-TLB accesses occur in parallel */
